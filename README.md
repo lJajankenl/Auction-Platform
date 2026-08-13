@@ -1,3 +1,210 @@
+# Auction Platform
+
+A full-stack Spring Boot and React auction application demonstrating layered architecture, REST APIs, real-time bidding, and payment processing.
+
+**Note:** This is a forked version of a group project. This README documents my specific backend contributions to the payment and auction systems.
+
+---
+
+## My Contributions
+
+### **Auction Winner Determination System**
+
+Designed and implemented the core winner-determination algorithm in `AuctionService`:
+
+- **`winningRule(AuctionResultDTO details)`** — Initial skeleton with winner retrieval logic
+- **`getWinner(Long auctionID)`** — Complete implementation with `@Transactional` handling:
+  - Validates auction state (checks if auction has ended)
+  - Iterates through all bids to find the highest amount
+  - Matches highest bid to bidder identity
+  - Persists winner to database via `auctionRepository.save()`
+  - Handles edge cases and exceptions
+
+**Key Technical Decisions:**
+- Used `@Transactional` to ensure atomic winner determination
+- Fetched auction state from repository (not DTO) to prevent stale data
+- Proper exception handling with meaningful error messages
+
+---
+
+### **Payment Processing System**
+
+Built complete payment service layer from scratch, extracting logic into dedicated `PaymentService` class:
+
+#### **PaymentService (`placePayment` Method)**
+
+Implemented full payment placement workflow:
+
+- **Auction Validation:** Checks if auction has ended before allowing payment
+- **Payee Verification:** Retrieves and validates payee exists in system
+- **Payment Validation:**
+  - Credit card number must be exactly 16 digits
+  - Expiry date must not be before current time
+  - Security code must be exactly 3 digits
+- **Payment Object Creation:** Uses builder pattern with all required fields:
+  - `paymentID` — auto-generated
+  - `auction` — reference to auction entity
+  - `payee` — winning bidder
+  - `paymentDate` — timestamp (OffsetDateTime.now())
+  - `expectedDeliveryDate` — 7 days after payment
+- **Persistence:** Saves payment to database via `paymentRepository`
+- **Response Building:** Constructs `PaymentResponseDTO` with delivery details
+- **Error Handling:** Exception handling for auction not found, payee not found, payment failures
+
+**Database Retrieval Optimization:**
+- Refactored to use `findDetailedById()` custom query
+- Eagerly loads all related entities (payee with address, bids, auction, item) to prevent N+1 queries
+
+#### **PaymentService (`createReceipt` Method)**
+
+Implemented receipt generation with complex data aggregation:
+
+- **Payment Verification:** Retrieves stored payment from repository before creating receipt
+- **Bid Analysis:** Iterates through winning user's bids to find largest amount bid
+- **Price Calculation:** Computes total price as base price (highest bid amount) + shipping cost
+- **Receipt DTO Assembly:** Builds `ReceiptResponseDTO` with:
+  - Payee details (firstName, lastName, full address)
+  - Auction/item information (itemID, itemName)
+  - Pricing (totalPaid, shippingDate)
+  - Delivery information (expectedDeliveryDate)
+- **Exception Handling:** Returns error receipt if payment not found
+
+---
+
+### **Data Transfer Objects (DTOs)**
+
+Designed and implemented 5 DTOs for clean API contracts and data transfer:
+
+**PaymentRequestDTO** (29 fields)
+- Payment details: paymentID, auctionID
+- Cardholder info: firstName, lastName, streetName, streetNumber, city, country, postalCode
+- Card details: cardNumber (String), nameOnCard, expiryDate (OffsetDateTime), securityCode (String)
+- User reference: user (User object)
+- Uses Lombok (@Data, @Builder, @NoArgsConstructor, @AllArgsConstructor)
+
+**PaymentResponseDTO** (4 fields)
+- Response data: paymentID, firstName, lastName, deliveryDate
+- Message confirmation ("Payment placed successfully.")
+- Uses Lombok annotations
+
+**PaymentDTO** (3 fields)
+- Simplified payment reference: paymentID, auction, payee
+- Used for payment object handling
+
+**PaymentDetailDTO** (5 fields)
+- Complete payment details: paymentID, auction, payee, paymentDate, expectedDeliveryDate
+- Retrieved from database for detailed payment information
+
+**ReceiptResponseDTO** (11 fields)
+- Receipt details with address: firstName, lastName, streetName, streetNumber, city, country, postalCode
+- Item info: itemID, totalPaid (BigDecimal), shippingDate (OffsetDateTime)
+- Message confirmation ("Receipt generated.")
+
+---
+
+### **Payment Entity & Persistence**
+
+Designed `Payment` JPA entity with proper relationships:
+
+- **Fields:** paymentID (auto-generated), auction (ManyToOne), payee (User), paymentDate, expectedDeliveryDate
+- **Relationships:** Properly configured @JoinColumn for auction reference
+- **Annotations:** @Entity, @Table("payments"), @Lombok utilities
+- **Exclusions:** Used @ToString.Exclude and @EqualsAndHashCode.Exclude for relationship handling to prevent circular references
+
+**PaymentRepository**
+- Created Spring Data JPA repository interface extending `JpaRepository<Payment, Long>`
+- Implemented custom `findDetailedById()` query with FETCH joins:
+  ```sql
+  SELECT p FROM Payment p
+  JOIN FETCH p.payee u
+  LEFT JOIN FETCH u.address
+  LEFT JOIN FETCH u.bids b
+  JOIN FETCH p.auction a
+  JOIN FETCH a.item i
+  WHERE p.paymentID = :id
+  ```
+- Prevents N+1 query problems by eagerly loading all related entities in single query
+
+---
+
+### **REST API Endpoints**
+
+Implemented `PaymentController` with two endpoints:
+
+**GET `/auction/payment/{paymentId}`**
+- Retrieves payment details by ID
+- Calls `paymentService.getPaymentDetails(paymentId)`
+- Returns `ResponseEntity<PaymentDetailDTO>`
+
+**POST `/auction/place`**
+- Accepts `PaymentRequestDTO` in request body
+- Calls `paymentService.placePayment(request)`
+- Returns `ResponseEntity<PaymentResponseDTO>` with payment confirmation
+
+**POST `/auction/receipt`**
+- Accepts `Payment` object in request body
+- Calls `paymentService.createReceipt(payment)`
+- Returns `ResponseEntity<ReceiptResponseDTO>` with receipt details
+
+---
+
+### **Refactoring & Architecture Improvements**
+
+**Service Layer Separation:**
+- Extracted payment logic from `AuctionService` into dedicated `PaymentService` class
+- Removed `placePayment()` and `createReceipt()` methods from auction service
+- Improved separation of concerns and testability
+
+**Datetime Handling:**
+- Refactored `PaymentRequestDTO` and `PaymentResponseDTO` to use `OffsetDateTime` instead of `Date`
+- Ensures consistency with project-wide datetime standards
+
+**Data Type Fixes:**
+- Changed `cardNumber` and `securityCode` from `Long` to `String` in `PaymentRequestDTO` for proper validation
+- Changed `totalPaid` from `Float` to `BigDecimal` in `ReceiptResponseDTO` for precise monetary calculations
+
+**Import Cleanup:**
+- Removed unused imports across payment-related classes
+- Kept only necessary Spring, JPA, Lombok, and Java imports
+
+---
+
+## Tech Stack
+
+**Backend:**
+- Java 17, Spring Boot 3.x
+- Spring Data JPA/Hibernate with custom queries
+- Spring MVC REST
+- Lombok for boilerplate reduction
+- Jakarta Persistence annotations
+
+**Database:**
+- PostgreSQL with JPA entity relationships
+- Custom @Query for complex JOIN FETCH scenarios
+
+**Frontend:**
+- React, TypeScript, Vite
+
+---
+
+## What I Learned
+
+This project reinforced several key backend principles:
+
+1. **Layered Architecture** — Clean separation between controllers, services, repositories, and DTOs
+2. **Database Optimization** — Using FETCH joins to avoid N+1 query problems in complex scenarios
+3. **Business Logic Encapsulation** — Implementing core algorithms (winner determination, payment validation) with proper exception handling
+4. **Data Integrity** — Using `@Transactional` and proper entity relationships to maintain consistency
+5. **API Design** — Building RESTful endpoints with appropriate DTOs and error handling
+
+---
+
+## Original Project
+
+Built as part of EECS 4413 (Building E-Commerce Systems) at York University.  
+Original repository: [jhaniff/EECS4413-Auction-Site](https://github.com/jhaniff/EECS4413-Auction-Site)
+
+---
 # Auction Platform (EECS-4413)
 
 ## 🧾 Project Overview
