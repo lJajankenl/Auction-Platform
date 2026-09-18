@@ -8,22 +8,17 @@ A full-stack Spring Boot and React auction application demonstrating layered arc
 
 ## My Contributions
 
-### **Auction Winner Determination System**
+### **Auction Winner Determination**
 
-Designed and implemented the core winner-determination algorithm in `AuctionService`:
+Implemented a winner-determination algorithm in `AuctionService`, iterating through several design passes:
 
-- **`winningRule(AuctionResultDTO details)`** — Initial skeleton with winner retrieval logic
-- **`getWinner(Long auctionID)`** — Complete implementation with `@Transactional` handling:
-  - Validates auction state (checks if auction has ended)
-  - Iterates through all bids to find the highest amount
-  - Matches highest bid to bidder identity
-  - Persists winner to database via `auctionRepository.save()`
-  - Handles edge cases and exceptions
+- **`winningRule(AuctionResultDTO details)`** — initial skeleton with winner retrieval logic
+- **`getWinner(Long auctionID)`** — full `@Transactional` implementation: validated auction state (checks if the auction has ended), iterated all bids to find the highest amount, matched it to the bidder, and persisted the result via `auctionRepository.save()`
+- Fixed a bug where auction status was read from a stale DTO instead of the live repository state, and added `@Transactional` handling for consistency
 
-**Key Technical Decisions:**
-- Used `@Transactional` to ensure atomic winner determination
-- Fetched auction state from repository (not DTO) to prevent stale data
-- Proper exception handling with meaningful error messages
+After building and testing this end-to-end, I identified that it duplicated an existing `getWinningBidder()` accessor already in the codebase and removed the redundant method rather than ship duplicate logic.
+
+**What's live today:** a `GET /{auctionId}/winner` endpoint in `AuctionController`, which retrieves the highest bidder from the auction and returns their details via a `WinnerDTO` (built alongside the DTOs below) — this is what the frontend calls to display winner info on the payment page.
 
 ---
 
@@ -75,10 +70,10 @@ Implemented receipt generation with complex data aggregation:
 
 Designed and implemented 5 DTOs for clean API contracts and data transfer:
 
-**PaymentRequestDTO** (29 fields)
+**PaymentRequestDTO** (15 fields)
 - Payment details: paymentID, auctionID
 - Cardholder info: firstName, lastName, streetName, streetNumber, city, country, postalCode
-- Card details: cardNumber (String), nameOnCard, expiryDate (OffsetDateTime), securityCode (String)
+- Card details: cardNumber (String), nameOnCard, expiryDate (OffsetDateTime), securityCode (String), isExpedited (boolean)
 - User reference: user (User object)
 - Uses Lombok (@Data, @Builder, @NoArgsConstructor, @AllArgsConstructor)
 
@@ -109,7 +104,7 @@ Designed and implemented 5 DTOs for clean API contracts and data transfer:
 
 Designed `Payment` JPA entity with proper relationships:
 
-- **Fields:** paymentID (auto-generated), auction (ManyToOne), payee (User), paymentDate, expectedDeliveryDate
+- **Fields:** paymentID (auto-generated), auction (ManyToOne), payee (User), paymentDate, expectedDeliveryDate, isExpedited
 - **Relationships:** Properly configured @JoinColumn for auction reference
 - **Annotations:** @Entity, @Table("payments"), @Lombok utilities
 - **Exclusions:** Used @ToString.Exclude and @EqualsAndHashCode.Exclude for relationship handling to prevent circular references
@@ -132,22 +127,23 @@ Designed `Payment` JPA entity with proper relationships:
 
 ### **REST API Endpoints**
 
-Implemented `PaymentController` with three endpoints:
+Implemented `PaymentController` (base path `/payment`) with three endpoints:
 
-**GET `/auction/payment/{paymentId}`**
+**GET `/payment/{paymentId}`**
 - Retrieves payment details by ID
 - Calls `paymentService.getPaymentDetails(paymentId)`
 - Returns `ResponseEntity<PaymentDetailDTO>`
 
-**POST `/auction/place`**
+**POST `/payment/place`**
 - Accepts `PaymentRequestDTO` in request body
 - Calls `paymentService.placePayment(request)`
 - Returns `ResponseEntity<PaymentResponseDTO>` with payment confirmation
 
-**POST `/auction/receipt`**
-- Accepts `Payment` object in request body
-- Calls `paymentService.createReceipt(payment)`
+**GET `/payment/receipt/{paymentId}`**
+- Accepts the payment ID as a path variable
+- Calls `paymentService.createReceipt(paymentId)`
 - Returns `ResponseEntity<ReceiptResponseDTO>` with receipt details
+- (This endpoint went through a couple of iterations — it started as `POST /auction/receipt` taking a full `Payment` object, and was refactored down to a `GET` taking just the ID, to match how the frontend actually needed to call it)
 
 ---
 
@@ -233,6 +229,13 @@ This project reinforced several key backend and full-stack principles:
 4. **Data Integrity** — Using `@Transactional` and proper entity relationships to maintain consistency
 5. **API Design** — Building RESTful endpoints with appropriate DTOs and error handling
 6. **Full-Stack Consistency** — Mirroring backend validation rules (card number length, security code format) on the client for immediate user feedback, while keeping the backend as the source of truth
+
+---
+
+## Original Project
+
+Built as part of EECS 4413 (Building E-Commerce Systems) at York University.
+Original repository: [jhaniff/EECS4413-Auction-Site](https://github.com/jhaniff/EECS4413-Auction-Site)
 
 ---
 
