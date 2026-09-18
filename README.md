@@ -100,6 +100,9 @@ Designed and implemented 5 DTOs for clean API contracts and data transfer:
 - Item info: itemID, totalPaid (BigDecimal), shippingDate (OffsetDateTime)
 - Message confirmation ("Receipt generated.")
 
+**WinnerDTO**
+- Surfaces winning-bidder identity and address fields to the frontend for display on the payment page
+
 ---
 
 ### **Payment Entity & Persistence**
@@ -129,7 +132,7 @@ Designed `Payment` JPA entity with proper relationships:
 
 ### **REST API Endpoints**
 
-Implemented `PaymentController` with two endpoints:
+Implemented `PaymentController` with three endpoints:
 
 **GET `/auction/payment/{paymentId}`**
 - Retrieves payment details by ID
@@ -169,6 +172,39 @@ Implemented `PaymentController` with two endpoints:
 
 ---
 
+### **Frontend Implementation (React/TypeScript)**
+
+Built the client-side bidding, payment, and receipt flow from scratch, wiring each screen to the backend endpoints above.
+
+**`BidForm`**
+- Controlled form for entering a bid amount, with a dedicated header and a clear "Submit Bid" call-to-action
+- Validates the entered amount against the current highest bid before allowing submission, with error states surfaced for insufficient or invalid amounts
+- On submit, passes the bid amount and auction ID to `placeBid` and routes the user to the auction detail page
+
+**`AuctionDetailPage`**
+- Live countdown timer computed from the current time and the auction's end time, updating the displayed time remaining and switching to an "auction ended" state once time expires
+- Fetches and displays the winning bidder's info (via `WinnerDTO`) once an auction has ended
+- Redirect handling so a bidder who did not win cannot land on the payment page for that auction
+
+**`PaymentForm` / `PaymentPage`**
+- Full payment form covering card number, name on card, expiry date, security code, and an expedited-shipping checkbox
+- Client-side validation mirrors the backend rules: digit-only input masking and length limits on the card number and security code fields, with per-field error messages before submission is allowed
+- Expedited-shipping selection is factored into the delivery date and total price shown to the user
+- Submits the assembled payment payload to `placePayment` and displays a confirmation once the backend responds
+
+**`ReceiptPage`**
+- Retrieves the generated receipt by payment ID and displays payee details, shipping details, and total price paid
+- Handles the case where the receipt hasn't loaded yet before rendering
+
+**API layer**
+- Authored `bidAPI.ts` (`placeBid`) and `paymentAPI.ts` (`placePayment`) from scratch to connect the forms above to their respective backend endpoints
+- Added a shared `authHeader()` helper and applied it to existing auction/search API calls (`auctionApi.ts`) so authenticated requests correctly attach the bearer token
+
+**Styling**
+- Styled the bid, payment, and receipt views (`auctionStyles.css`) to match the site's overall visual design
+
+---
+
 ## Tech Stack
 
 **Backend:**
@@ -189,19 +225,20 @@ Implemented `PaymentController` with two endpoints:
 
 ## What I Learned
 
-This project reinforced several key backend principles:
+This project reinforced several key backend and full-stack principles:
 
 1. **Layered Architecture** — Clean separation between controllers, services, repositories, and DTOs
 2. **Database Optimization** — Using FETCH joins to avoid N+1 query problems in complex scenarios
 3. **Business Logic Encapsulation** — Implementing core algorithms (winner determination, payment validation) with proper exception handling
 4. **Data Integrity** — Using `@Transactional` and proper entity relationships to maintain consistency
 5. **API Design** — Building RESTful endpoints with appropriate DTOs and error handling
+6. **Full-Stack Consistency** — Mirroring backend validation rules (card number length, security code format) on the client for immediate user feedback, while keeping the backend as the source of truth
 
 ---
 
 ## Original Project
 
-Built as part of EECS 4413 (Building E-Commerce Systems) at York University.  
+Built as part of EECS 4413 (Building E-Commerce Systems) at York University.
 Original repository: [jhaniff/EECS4413-Auction-Site](https://github.com/jhaniff/EECS4413-Auction-Site)
 
 ---
