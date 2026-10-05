@@ -1,4 +1,4 @@
-# Auction Platform
+# BidSphere (Auction Platform)
  
 A full-stack Spring Boot and React auction application demonstrating layered architecture, REST APIs, real-time bidding, and payment processing.
  
