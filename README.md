@@ -1,36 +1,35 @@
 # Auction Platform
-
+ 
 A full-stack Spring Boot and React auction application demonstrating layered architecture, REST APIs, real-time bidding, and payment processing.
-
-**Note:** This is a forked version of a group project. This README documents my specific backend contributions to the payment and auction systems.
-
+ 
+**Note:** This is a forked version of a group project. This README documents my specific backend and frontend contributions to the payment and auction systems.
+ 
 ---
-
+ 
 ## My Contributions
-
+ 
 ### **Auction Winner Determination**
-
+ 
 Implemented a winner-determination algorithm in `AuctionService`, iterating through several design passes:
-
+ 
 - **`winningRule(AuctionResultDTO details)`** — initial skeleton with winner retrieval logic
 - **`getWinner(Long auctionID)`** — full `@Transactional` implementation: validated auction state (checks if the auction has ended), iterated all bids to find the highest amount, matched it to the bidder, and persisted the result via `auctionRepository.save()`
 - Fixed a bug where auction status was read from a stale DTO instead of the live repository state, and added `@Transactional` handling for consistency
-
 After building and testing this end-to-end, I identified that it duplicated an existing `getWinningBidder()` accessor already in the codebase and removed the redundant method rather than ship duplicate logic.
-
+ 
 **What's live today:** a `GET /{auctionId}/winner` endpoint in `AuctionController`, which retrieves the highest bidder from the auction and returns their details via a `WinnerDTO` (built alongside the DTOs below) — this is what the frontend calls to display winner info on the payment page.
-
+ 
 ---
-
+ 
 ### **Payment Processing System**
-
+ 
 Built complete payment service layer from scratch, extracting logic into dedicated `PaymentService` class:
-
+ 
 #### **PaymentService (`placePayment` Method)**
-
+ 
 Implemented full payment placement workflow:
-
-- **Auction Validation:** Checks if auction has ended before allowing payment
+ 
+- **Auction Validation:** Checks that the auction has ended, that the requesting user is the highest bidder, and that the item hasn't already been sold
 - **Payee Verification:** Retrieves and validates payee exists in system
 - **Payment Validation:**
   - Credit card number must be exactly 16 digits
@@ -41,78 +40,66 @@ Implemented full payment placement workflow:
   - `auction` — reference to auction entity
   - `payee` — winning bidder
   - `paymentDate` — timestamp (OffsetDateTime.now())
-  - `expectedDeliveryDate` — 7 days after payment
-- **Persistence:** Saves payment to database via `paymentRepository`
+  - `expectedDeliveryDate` — 2 days after payment for expedited shipping, 7 days otherwise
+  - `isExpedited` — whether expedited shipping was selected
+- **Persistence:** Saves payment to database via `paymentRepository` and marks the item as sold via `itemRepository`
 - **Response Building:** Constructs `PaymentResponseDTO` with delivery details
 - **Error Handling:** Exception handling for auction not found, payee not found, payment failures
-
-**Database Retrieval Optimization:**
-- Refactored to use `findDetailedById()` custom query
-- Eagerly loads all related entities (payee with address, bids, auction, item) to prevent N+1 queries
-
 #### **PaymentService (`createReceipt` Method)**
-
+ 
 Implemented receipt generation with complex data aggregation:
-
-- **Payment Verification:** Retrieves stored payment from repository before creating receipt
+ 
+- **Payment Verification:** Retrieves stored payment from repository before creating receipt, and verifies the requesting user is the payee
+- **Database Retrieval:** Uses the custom `findDetailedById()` query, which loads the payment with its payee (including address and bids), auction, and item in a single query
 - **Bid Analysis:** Iterates through winning user's bids to find largest amount bid
-- **Price Calculation:** Computes total price as base price (highest bid amount) + shipping cost
+- **Price Calculation:** Computes total price as base price (highest bid amount) + base shipping cost, plus the expedited shipping cost when expedited shipping was selected
 - **Receipt DTO Assembly:** Builds `ReceiptResponseDTO` with:
   - Payee details (firstName, lastName, full address)
-  - Auction/item information (itemID, itemName)
-  - Pricing (totalPaid, shippingDate)
-  - Delivery information (expectedDeliveryDate)
-- **Exception Handling:** Returns error receipt if payment not found
-
+  - Auction/item information (itemID)
+  - Pricing (totalPaid)
+  - Delivery information (shippingDate — the expected delivery date)
+- **Exception Handling:** Returns error receipt if payment not found or the requester isn't the payee
 ---
-
+ 
 ### **Data Transfer Objects (DTOs)**
-
-Designed and implemented 5 DTOs for clean API contracts and data transfer:
-
-**PaymentRequestDTO** (15 fields)
+ 
+Designed and implemented 6 DTOs for clean API contracts and data transfer:
+ 
+**PaymentRequestDTO** (14 fields)
 - Payment details: paymentID, auctionID
 - Cardholder info: firstName, lastName, streetName, streetNumber, city, country, postalCode
 - Card details: cardNumber (String), nameOnCard, expiryDate (OffsetDateTime), securityCode (String), isExpedited (boolean)
-- User reference: user (User object)
 - Uses Lombok (@Data, @Builder, @NoArgsConstructor, @AllArgsConstructor)
-
-**PaymentResponseDTO** (4 fields)
+**PaymentResponseDTO** (5 fields)
 - Response data: paymentID, firstName, lastName, deliveryDate
 - Message confirmation ("Payment placed successfully.")
 - Uses Lombok annotations
-
 **PaymentDTO** (3 fields)
 - Simplified payment reference: paymentID, auction, payee
 - Used for payment object handling
-
-**PaymentDetailDTO** (5 fields)
-- Complete payment details: paymentID, auction, payee, paymentDate, expectedDeliveryDate
+**PaymentDetailDTO** (12 fields)
+- Complete payment details: paymentID, payee name (firstName, lastName), full address (streetName, streetNumber, city, country, postalCode), totalBaseCost, totalExpeditedCost, paymentDate, expectedDeliveryDate
 - Retrieved from database for detailed payment information
-
 **ReceiptResponseDTO** (11 fields)
 - Receipt details with address: firstName, lastName, streetName, streetNumber, city, country, postalCode
 - Item info: itemID, totalPaid (BigDecimal), shippingDate (OffsetDateTime)
 - Message confirmation ("Receipt generated.")
-
 **WinnerDTO**
 - Surfaces winning-bidder identity and address fields to the frontend for display on the payment page
-
 ---
-
+ 
 ### **Payment Entity & Persistence**
-
+ 
 Designed `Payment` JPA entity with proper relationships:
-
+ 
 - **Fields:** paymentID (auto-generated), auction (ManyToOne), payee (User), paymentDate, expectedDeliveryDate, isExpedited
 - **Relationships:** Properly configured @JoinColumn for auction reference
 - **Annotations:** @Entity, @Table("payments"), @Lombok utilities
 - **Exclusions:** Used @ToString.Exclude and @EqualsAndHashCode.Exclude for relationship handling to prevent circular references
-
 **PaymentRepository**
 - Created Spring Data JPA repository interface extending `JpaRepository<Payment, Long>`
 - Implemented custom `findDetailedById()` query with FETCH joins:
-  ```sql
+```sql
   SELECT p FROM Payment p
   JOIN FETCH p.payee u
   LEFT JOIN FETCH u.address
@@ -120,124 +107,99 @@ Designed `Payment` JPA entity with proper relationships:
   JOIN FETCH p.auction a
   JOIN FETCH a.item i
   WHERE p.paymentID = :id
-  ```
-- Prevents N+1 query problems by eagerly loading all related entities in single query
-
+```
+- Loads the payment together with its payee, address, payee's bids, auction, and item in a single query instead of separate lazy loads
 ---
-
+ 
 ### **REST API Endpoints**
-
-Implemented `PaymentController` (base path `/payment`) with three endpoints:
-
-**GET `/payment/{paymentId}`**
+ 
+Implemented `PaymentController` (base path `/api/payment`) with three endpoints. Each one identifies the caller from the authenticated user and returns its DTO wrapped in a HATEOAS `EntityModel`:
+ 
+**GET `/api/payment/{paymentId}`**
 - Retrieves payment details by ID
-- Calls `paymentService.getPaymentDetails(paymentId)`
-- Returns `ResponseEntity<PaymentDetailDTO>`
-
-**POST `/payment/place`**
+- Calls `paymentService.getPaymentDetails(paymentId, userId)`
+- Returns `ResponseEntity<EntityModel<PaymentDetailDTO>>`
+**POST `/api/payment/place`**
 - Accepts `PaymentRequestDTO` in request body
-- Calls `paymentService.placePayment(request)`
-- Returns `ResponseEntity<PaymentResponseDTO>` with payment confirmation
-
-**GET `/payment/receipt/{paymentId}`**
-- Accepts the payment ID as a path variable
-- Calls `paymentService.createReceipt(paymentId)`
-- Returns `ResponseEntity<ReceiptResponseDTO>` with receipt details
-- (This endpoint went through a couple of iterations — it started as `POST /auction/receipt` taking a full `Payment` object, and was refactored down to a `GET` taking just the ID, to match how the frontend actually needed to call it)
-
+- Calls `paymentService.placePayment(request, userId)`
+- Returns `ResponseEntity<EntityModel<PaymentResponseDTO>>` with payment confirmation
+**POST `/api/payment/receipt`**
+- Accepts a request body containing the `paymentID`
+- Calls `paymentService.createReceipt(paymentId, userId)`
+- Returns `ResponseEntity<EntityModel<ReceiptResponseDTO>>` with receipt details
 ---
-
+ 
 ### **Refactoring & Architecture Improvements**
-
+ 
 **Service Layer Separation:**
 - Extracted payment logic from `AuctionService` into dedicated `PaymentService` class
 - Removed `placePayment()` and `createReceipt()` methods from auction service
 - Improved separation of concerns and testability
-
 **Datetime Handling:**
 - Refactored `PaymentRequestDTO` and `PaymentResponseDTO` to use `OffsetDateTime` instead of `Date`
 - Ensures consistency with project-wide datetime standards
-
 **Data Type Fixes:**
 - Changed `cardNumber` and `securityCode` from `Long` to `String` in `PaymentRequestDTO` for proper validation
 - Changed `totalPaid` from `Float` to `BigDecimal` in `ReceiptResponseDTO` for precise monetary calculations
-
 **Import Cleanup:**
 - Removed unused imports across payment-related classes
 - Kept only necessary Spring, JPA, Lombok, and Java imports
-
 ---
-
+ 
 ### **Frontend Implementation (React/TypeScript)**
-
+ 
 Built the client-side bidding, payment, and receipt flow from scratch, wiring each screen to the backend endpoints above.
-
+ 
 **`BidForm`**
 - Controlled form for entering a bid amount, with a dedicated header and a clear "Submit Bid" call-to-action
 - Validates the entered amount against the current highest bid before allowing submission, with error states surfaced for insufficient or invalid amounts
 - On submit, passes the bid amount and auction ID to `placeBid` and routes the user to the auction detail page
-
 **`AuctionDetailPage`**
 - Live countdown timer computed from the current time and the auction's end time, updating the displayed time remaining and switching to an "auction ended" state once time expires
 - Fetches and displays the winning bidder's info (via `WinnerDTO`) once an auction has ended
 - Redirect handling so a bidder who did not win cannot land on the payment page for that auction
-
 **`PaymentForm` / `PaymentPage`**
 - Full payment form covering card number, name on card, expiry date, security code, and an expedited-shipping checkbox
 - Client-side validation mirrors the backend rules: digit-only input masking and length limits on the card number and security code fields, with per-field error messages before submission is allowed
-- Expedited-shipping selection is factored into the delivery date and total price shown to the user
+- Expedited-shipping selection is sent with the payment and reflected in the delivery date and total price shown on the receipt
 - Submits the assembled payment payload to `placePayment` and displays a confirmation once the backend responds
-
 **`ReceiptPage`**
 - Retrieves the generated receipt by payment ID and displays payee details, shipping details, and total price paid
 - Handles the case where the receipt hasn't loaded yet before rendering
-
 **API layer**
 - Authored `bidAPI.ts` (`placeBid`) and `paymentAPI.ts` (`placePayment`) from scratch to connect the forms above to their respective backend endpoints
 - Added a shared `authHeader()` helper and applied it to existing auction/search API calls (`auctionApi.ts`) so authenticated requests correctly attach the bearer token
-
 **Styling**
 - Styled the bid, payment, and receipt views (`auctionStyles.css`) to match the site's overall visual design
-
 ---
-
+ 
 ## Tech Stack
-
+ 
 **Backend:**
 - Java 17, Spring Boot 3.x
 - Spring Data JPA/Hibernate with custom queries
 - Spring MVC REST
 - Lombok for boilerplate reduction
 - Jakarta Persistence annotations
-
 **Database:**
 - PostgreSQL with JPA entity relationships
 - Custom @Query for complex JOIN FETCH scenarios
-
 **Frontend:**
 - React, TypeScript, Vite
-
 ---
-
+ 
 ## What I Learned
-
+ 
 This project reinforced several key backend and full-stack principles:
-
+ 
 1. **Layered Architecture** — Clean separation between controllers, services, repositories, and DTOs
-2. **Database Optimization** — Using FETCH joins to avoid N+1 query problems in complex scenarios
+2. **Database Optimization** — Using JOIN FETCH to load related entities in a single query instead of separate lazy loads
 3. **Business Logic Encapsulation** — Implementing core algorithms (winner determination, payment validation) with proper exception handling
 4. **Data Integrity** — Using `@Transactional` and proper entity relationships to maintain consistency
 5. **API Design** — Building RESTful endpoints with appropriate DTOs and error handling
 6. **Full-Stack Consistency** — Mirroring backend validation rules (card number length, security code format) on the client for immediate user feedback, while keeping the backend as the source of truth
-
 ---
 
-## Original Project
-
-Built as part of EECS 4413 (Building E-Commerce Systems) at York University.
-Original repository: [jhaniff/EECS4413-Auction-Site](https://github.com/jhaniff/EECS4413-Auction-Site)
-
----
 
 ## Original Project
 
